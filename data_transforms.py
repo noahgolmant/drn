@@ -32,7 +32,7 @@ class RandomCrop(object):
                 'reflection', image, top, bottom, left, right)
         w, h = image.size
         if w == tw and h == th:
-            return (img, label, *args)
+            return (image, label, *args)
 
         x1 = random.randint(0, w - tw)
         y1 = random.randint(0, h - th)
@@ -41,6 +41,24 @@ class RandomCrop(object):
             results.append(label.crop((x1, y1, x1 + tw, y1 + th)))
         results.extend(args)
         return results
+
+
+class Scale(object):
+    def __init__(self, scale):
+        self.ratio = scale
+
+    def __call__(self, image, label):
+        w, h = image.size
+        tw = int(self.ratio * w)
+        th = int(self.ratio * h)
+        if self.ratio == 1:
+            return image, label
+        elif self.ratio < 1:
+            interpolation = Image.ANTIALIAS
+        else:
+            interpolation = Image.CUBIC
+        return image.resize((tw, th), interpolation), \
+               label.resize((tw, th), Image.NEAREST)
 
 
 class RandomScale(object):

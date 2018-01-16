@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import boto3
 import json
 import logging
 import math
@@ -21,7 +22,7 @@ import torch
 from torch import nn
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
-from torchvision import datasets, transforms
+from torchvision import datasets
 from torch.autograd import Variable
 
 import drn
@@ -31,6 +32,9 @@ try:
     from modules import batchnormsync
 except ImportError:
     pass
+
+s3 = boto3.resource('s3')
+bucket_name = 'video-prediction'
 
 FORMAT = "[%(asctime)-15s %(filename)s:%(lineno)d %(funcName)s] %(message)s"
 logging.basicConfig(format=FORMAT)
@@ -59,6 +63,22 @@ CITYSCAPE_PALETTE = np.asarray([
     [0, 0, 230],
     [119, 11, 32],
     [0, 0, 0]], dtype=np.uint8)
+
+def upload_to_s3(filename, prefix='cifar'):
+    s3.Bucket(bucket_name).upload_file(filename,
+                                       os.path.join(prefix, filename))
+    print('load {} to s3'.format(filename))
+
+def download_to_s3(filename, prefix='cifar'):
+    if not os.path.isfile(filename):
+        dirname = os.path.dirname(filename)
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
+        s3.Bucket(bucket_name).download_file(os.path.join(prefix, filename),
+                                             filename)
+        logging.info('download {} to s3'.format(filename))
+    else:
+        logging.info('{} exits'.format(filename))
 
 
 def fill_up_weights(up):
@@ -351,6 +371,8 @@ def train_seg(args):
     normalize = transforms.Normalize(mean=info['mean'],
                                      std=info['std'])
     t = []
+    if args.downsample:
+        t.append(transforms.Scale(0.5))
     if args.random_rotate > 0:
         t.append(transforms.RandomRotate(args.random_rotate))
     if args.random_scale > 0:
@@ -423,6 +445,11 @@ def train_seg(args):
         if (epoch + 1) % 10 == 0:
             history_path = 'checkpoint_{:03d}.pth.tar'.format(epoch + 1)
             shutil.copyfile(checkpoint_path, history_path)
+        # save latest checkpoint to s3
+        try:
+            upload_to_s3(checkpoint_path, prefix=args.arch)
+        except:
+            logging.info('failed to upload latest checkpoint to s3')
 
 
 def adjust_learning_rate(args, optimizer, epoch):
@@ -699,6 +726,7 @@ def parse_args():
     parser.add_argument('--phase', default='val')
     parser.add_argument('--random-scale', default=0, type=float)
     parser.add_argument('--random-rotate', default=0, type=int)
+    parser.add_argument('--downsample', action='store_true')
     parser.add_argument('--bn-sync', action='store_true')
     parser.add_argument('--ms', action='store_true',
                         help='Turn on multi-scale testing')
