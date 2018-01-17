@@ -80,6 +80,16 @@ def download_to_s3(filename, prefix='cifar'):
     else:
         logging.info('{} exits'.format(filename))
 
+def save_args(args):
+    args.args_file = args_file = os.path.join('train_args.json')
+    with open(args_file, 'w') as f:
+        args_dict = {
+            k: v for k, v in args._get_kwargs()}
+        json.dump(args_dict, f)
+    try:
+        upload_to_s3(args_file, prefix=args.arch)
+    except:
+        logging.info('cannot upload training args to s3')
 
 def fill_up_weights(up):
     w = up.weight.data
@@ -340,11 +350,11 @@ def train(train_loader, model, criterion, optimizer, epoch,
                 data_time=data_time, loss=losses, top1=scores))
 
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+def save_checkpoint(state, is_best, filename='checkpoint.pth.tar', prefix='drn'):
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, 'model_best.pth.tar')
-
+        upload_to_s3('model_best.pth.tar', prefix=prefix)
 
 def train_seg(args):
     batch_size = args.batch_size
@@ -441,10 +451,12 @@ def train_seg(args):
             'arch': args.arch,
             'state_dict': model.state_dict(),
             'best_prec1': best_prec1,
-        }, is_best, filename=checkpoint_path)
+        }, is_best, filename=checkpoint_path, prefix=args.arch)
         if (epoch + 1) % 10 == 0:
             history_path = 'checkpoint_{:03d}.pth.tar'.format(epoch + 1)
             shutil.copyfile(checkpoint_path, history_path)
+            # save historical data to s3
+            upload_to_s3(history_path, prefix=args.arch)
         # save latest checkpoint to s3
         try:
             upload_to_s3(checkpoint_path, prefix=args.arch)
@@ -733,12 +745,14 @@ def parse_args():
     parser.add_argument('--with-gt', action='store_true')
     parser.add_argument('--test-suffix', default='', type=str)
     args = parser.parse_args()
-
+    
     assert args.data_dir is not None
     assert args.classes > 0
 
     print(' '.join(sys.argv))
     print(args)
+
+    save_args(args)
 
     if args.bn_sync:
         drn.BatchNorm = batchnormsync.BatchNormSync
